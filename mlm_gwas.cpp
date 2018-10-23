@@ -1,8 +1,8 @@
-#include <cmath>
 #include <limits>
 #include <numeric>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <algorithm>
 #include <functional>
 #include "cmdline.h"
@@ -250,8 +250,6 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
                     idx.push_back(i);
                 }
             }
-            if ( g.empty() )
-                continue;
             idummy2(factor(g), x1);
         }
         else {
@@ -267,8 +265,6 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
                     idx.push_back(i);
                 }
             }
-            if ( g.empty() )
-                continue;
             idummy2(factor(g), x1);
         }
 
@@ -368,8 +364,6 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
                     idx.push_back(i);
                 }
             }
-            if ( g.empty() )
-                continue;
             idummy2(factor(g), x1);
         }
         else {
@@ -385,8 +379,6 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
                     idx.push_back(i);
                 }
             }
-            if ( g.empty() )
-                continue;
             idummy2(factor(g), x1);
         }
 
@@ -545,6 +537,7 @@ int mlm_gwas(int argc, char *argv[])
     std::vector< std::vector<double> > vps;
 
     auto nt = pt.phe.size();
+
     for (size_t t = 0; t < nt; ++t) {
         std::vector<char> keep;
         for (auto e : pt.dat[t])
@@ -556,8 +549,8 @@ int mlm_gwas(int argc, char *argv[])
 
         if (std::find(keep.begin(), keep.end(), 0) != keep.end()) {
             y = subset(y, keep);
-            for (auto &v : ac2)
-                v = subset(v, keep);
+            for (auto &e : ac2)
+                e = subset(e, keep);
             gi2 = subset(gi, keep);
         }
 
@@ -572,12 +565,19 @@ int mlm_gwas(int argc, char *argv[])
     }
 
     std::ofstream ofs(par.out + ".pval");
+
+    if ( ! ofs ) {
+        std::cerr << "ERROR: can't open file: " << par.out << ".pval" << "\n";
+        return 1;
+    }
+
     ofs << "Locus\tChromosome\tPosition";
-    for (size_t t = 0; t < nt; ++t)
-        ofs << "\t" << pt.phe[t];
+    for (auto &e : pt.phe)
+        ofs << "\t" << e;
     ofs << "\n";
 
     auto m = gt.loc.size();
+
     for (size_t j = 0; j < m; ++j) {
         ofs << gt.loc[j] << "\t" << gt.chr[j] << "\t" << gt.pos[j];
         for (size_t t = 0; t < nt; ++t)
