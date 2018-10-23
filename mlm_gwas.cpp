@@ -477,6 +477,8 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
 
 int mlm_gwas(int argc, char *argv[])
 {
+    std::cerr << "MLM-GWAS 1.0 (Built on " __DATE__ " " __TIME__ ")\n";
+
     CmdLine cmd;
 
     cmd.add("--vcf", "VCF file", "");
