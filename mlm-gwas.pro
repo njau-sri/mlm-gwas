@@ -3,11 +3,9 @@ CONFIG += console c++11
 CONFIG -= app_bundle
 CONFIG -= qt
 
-INCLUDEPATH += D:/boost_1_67_0
-
-LIBS += -Ld:/mingw-w64-i686-lapack-3.8.0-3-any.pkg/mingw32/lib -llapack -lblas -lgfortran -lquadmath
-
-QMAKE_LFLAGS += -static
+LIBS += -llapack -lblas -lgfortran -lquadmath
+QMAKE_CXXFLAGS += -std=c++11 -fopenmp
+QMAKE_LFLAGS += -static -fopenmp
 
 SOURCES += \
         main.cpp \
@@ -18,7 +16,8 @@ SOURCES += \
     mlm_gwas.cpp \
     cmdline.cpp \
     pheno.cpp \
-    vcf.cpp
+    vcf.cpp \
+    util.cpp
 
 HEADERS += \
     emma.h \
@@ -28,4 +27,5 @@ HEADERS += \
     cmdline.h \
     pheno.h \
     split.h \
-    vcf.h
+    vcf.h \
+    util.h

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include "lsfit.h"
 #include "statsutil.h"
 #include "lapack.h"
+#include "util.h"
 
 
 using std::size_t;
@@ -29,49 +31,9 @@ struct Parameter
     std::string kin;
     std::string out;
     bool exact = false;
+    bool openmp = false;
 } par ;
 
-
-template<typename T>
-std::vector<T> intersect(std::vector<T> a, std::vector<T> b)
-{
-    std::sort(a.begin(), a.end());
-    std::sort(b.begin(), b.end());
-
-    std::vector<T> c;
-
-    std::set_intersection(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(c));
-
-    return c;
-}
-
-template<typename T1, typename T2>
-std::vector<T1> subset(const std::vector<T1> &vec, const std::vector<T2> &idx)
-{
-    std::vector<T1> out;
-
-    out.reserve(idx.size());
-    for (auto i : idx)
-        out.push_back(vec[i]);
-
-    return out;
-}
-
-template<typename T>
-std::vector<T> subset(const std::vector<T> &vec, const std::vector<char> &mask)
-{
-    std::vector<T> out;
-
-    out.reserve( std::count(mask.begin(), mask.end(), 1) );
-
-    auto n = vec.size();
-    for (size_t i = 0; i < n; ++i) {
-        if ( mask[i] )
-            out.push_back(vec[i]);
-    }
-
-    return out;
-}
 
 void filter_ind(const std::vector<int> &idx, Genotype &gt)
 {
@@ -236,6 +198,281 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
         return 1;
     }
 
+    std::vector<size_t> idx;
+    std::vector<allele_t> g1;
+    std::vector< std::pair<allele_t,allele_t> > g2;
+    std::vector<double> x;
+    std::vector<double> v;
+
+    for (size_t j = 0; j < m; ++j) {
+        idx.clear();
+        std::vector< std::vector<double> > x1;
+
+        if (gt.ploidy == 1) {
+            g1.clear();
+            for (size_t i = 0; i < n; ++i) {
+                auto ii = static_cast<size_t>(gi[i]);
+                auto a = gt.dat[j][ii];
+                if ( a ) {
+                    g1.push_back(a);
+                    idx.push_back(i);
+                }
+            }
+            idummy2(factor(g1), x1);
+        }
+        else {
+            g2.clear();
+            for (size_t i = 0; i < n; ++i) {
+                auto ii = static_cast<size_t>(gi[i]);
+                auto a = gt.dat[j][ii*2];
+                auto b = gt.dat[j][ii*2+1];
+                if ( a && b ) {
+                    if (a > b)
+                        std::swap(a, b);
+                    g2.emplace_back(a, b);
+                    idx.push_back(i);
+                }
+            }
+            idummy2(factor(g2), x1);
+        }
+
+        if ( x1.empty() )
+            continue;
+
+        auto nv = idx.size();
+        auto q1 = x1.size();
+        auto q = q0 + q1;
+
+        if (nv <= q) {
+            std::cerr << "ERROR: not enough observations for " << j + 1 << "\n";
+            continue;
+        }
+
+        double fval = 0;
+
+        if (nv == n) {
+            x = x0;
+
+            for (auto &e : x1)
+                x.insert(x.end(), e.begin(), e.end());
+
+            v = ki;
+            for (size_t i = 0; i < n; ++i)
+                v[i*n+i] -= 1;
+            C_dscal(v.size(), emma.vg, v.data(), 1);
+            for (size_t i = 0; i < n; ++i)
+                v[i*n+i] += emma.ve;
+
+            fval = glsfstat(q1, y, x, v);
+        }
+        else {
+            x.assign(nv, 1);
+
+            for (auto &e : ac) {
+                auto z = subset(e, idx);
+                x.insert(x.end(), z.begin(), z.end());
+            }
+
+            for (auto &e : x1)
+                x.insert(x.end(), e.begin(), e.end());
+
+            v.clear();
+            for (auto &e : subset(K, idx)) {
+                auto z = subset(e, idx);
+                v.insert(v.end(), z.begin(), z.end());
+            }
+            C_dscal(v.size(), emma.vg, v.data(), 1);
+            for (size_t i = 0; i < nv; ++i)
+                v[i*nv+i] += emma.ve;
+
+            fval = glsfstat(q1, subset(y,idx), x, v);
+        }
+
+        ps[j] = fpval(fval, q1, n-q1);
+    }
+
+    return 0;
+}
+
+int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
+                    const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+{
+    auto n = y.size();
+    auto m = gt.dat.size();
+
+    ps.assign(m, std::numeric_limits<double>::quiet_NaN());
+
+    auto q0 = 1 + ac.size();
+    std::vector< std::vector<double> > x0;
+    x0.push_back( std::vector<double>(n, 1) );
+    x0.insert(x0.end(), ac.begin(), ac.end());
+
+    std::vector<double> ki;
+
+    auto K = subset(kin.dat, gi);
+    for (auto &e : K) {
+        e = subset(e, gi);
+        ki.insert(ki.end(), e.begin(), e.end());
+    }
+
+    for (size_t i = 0; i < n; ++i)
+        ki[i*n+i] += 1;
+
+    std::vector<size_t> idx;
+    std::vector<allele_t> g1;
+    std::vector< std::pair<allele_t,allele_t> > g2;
+    std::vector<double> x;
+    std::vector<double> v;
+    std::vector<double> ki2;
+
+    for (size_t j = 0; j < m; ++j) {
+        idx.clear();
+        std::vector< std::vector<double> > x1;
+
+        if (gt.ploidy == 1) {
+            g1.clear();
+            for (size_t i = 0; i < n; ++i) {
+                auto ii = static_cast<size_t>(gi[i]);
+                auto a = gt.dat[j][ii];
+                if ( a ) {
+                    g1.push_back(a);
+                    idx.push_back(i);
+                }
+            }
+            idummy2(factor(g1), x1);
+        }
+        else {
+            g2.clear();
+            for (size_t i = 0; i < n; ++i) {
+                auto ii = static_cast<size_t>(gi[i]);
+                auto a = gt.dat[j][ii*2];
+                auto b = gt.dat[j][ii*2+1];
+                if ( a && b ) {
+                    if (a > b)
+                        std::swap(a, b);
+                    g2.emplace_back(a, b);
+                    idx.push_back(i);
+                }
+            }
+            idummy2(factor(g2), x1);
+        }
+
+        if ( x1.empty() )
+            continue;
+
+        auto nv = idx.size();
+        auto q1 = x1.size();
+        auto q = q0 + q1;
+
+        if (nv <= q) {
+            std::cerr << "ERROR: not enough observations for " << j + 1 << "\n";
+            continue;
+        }
+
+        x.clear();
+
+        if (nv != n) {
+            for (auto &e : x0) {
+                auto z = subset(e, idx);
+                x.insert(x.end(), z.begin(), z.end());
+            }
+        }
+        else {
+            for (auto &e : x0)
+                x.insert(x.end(), e.begin(), e.end());
+        }
+
+        for (auto &e : x1)
+            x.insert(x.end(), e.begin(), e.end());
+
+        EMMA emma;
+        double fval = 0;
+
+        if (nv == n) {
+            int info = emma.solve(n, q, x.data(), y.data(), ki.data());
+
+            if (info != 0) {
+                std::cerr << "ERROR: failed to solve mixed model for " << j + 1 << "\n";
+                continue;
+            }
+
+            v = ki;
+            for (size_t i = 0; i < n; ++i)
+                v[i*n+i] -= 1;
+            C_dscal(v.size(), emma.vg, v.data(), 1);
+            for (size_t i = 0; i < n; ++i)
+                v[i*n+i] += emma.ve;
+
+            fval = glsfstat(q1, y, x, v);
+        }
+        else {
+            auto y2 = subset(y, idx);
+
+            ki2.clear();
+            for (auto &e : subset(K, idx)) {
+                auto z = subset(e, idx);
+                ki2.insert(ki2.end(), z.begin(), z.end());
+            }
+            for (size_t i = 0; i < nv; ++i)
+                ki2[i*nv+i] += 1;
+
+            int info = emma.solve(nv, q, x.data(), y2.data(), ki2.data());
+
+            if (info != 0) {
+                std::cerr << "ERROR: failed to solve mixed model for " << j + 1 << "\n";
+                continue;
+            }
+
+            v = ki2;
+            for (size_t i = 0; i < nv; ++i)
+                v[i*nv+i] -= 1;
+            C_dscal(v.size(), emma.vg, v.data(), 1);
+            for (size_t i = 0; i < nv; ++i)
+                v[i*nv+i] += emma.ve;
+
+            fval = glsfstat(q1, y2, x, v);
+        }
+
+        ps[j] = fpval(fval, q1, n-q1);
+    }
+
+    return 0;
+}
+
+int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
+                  const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+{
+    auto n = y.size();
+    auto m = gt.dat.size();
+
+    ps.assign(m, std::numeric_limits<double>::quiet_NaN());
+
+    auto q0 = 1 + ac.size();
+    std::vector<double> x0(n, 1);
+    for (auto &v : ac)
+        x0.insert(x0.end(), v.begin(), v.end());
+
+    std::vector<double> ki;
+
+    auto K = subset(kin.dat, gi);
+    for (auto &e : K) {
+        e = subset(e, gi);
+        ki.insert(ki.end(), e.begin(), e.end());
+    }
+
+    for (size_t i = 0; i < n; ++i)
+        ki[i*n+i] += 1;
+
+    EMMA emma;
+
+    int info = emma.solve(n, q0, x0.data(), y.data(), ki.data());
+
+    if (info != 0) {
+        std::cerr << "ERROR: failed to solve mixed model\n";
+        return 1;
+    }
+
+    #pragma omp parallel for schedule(static)
     for (size_t j = 0; j < m; ++j) {
         std::vector<size_t> idx;
         std::vector< std::vector<double> > x1;
@@ -326,8 +563,8 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
     return 0;
 }
 
-int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
-                    const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+int assoc_mlm_exact_omp(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
+                        const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
 {
     auto n = y.size();
     auto m = gt.dat.size();
@@ -350,6 +587,7 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
     for (size_t i = 0; i < n; ++i)
         ki[i*n+i] += 1;
 
+    #pragma omp parallel for schedule(static)
     for (size_t j = 0; j < m; ++j) {
         std::vector<size_t> idx;
         std::vector< std::vector<double> > x1;
@@ -464,6 +702,7 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
     return 0;
 }
 
+
 } // namespace
 
 
@@ -479,6 +718,7 @@ int mlm_gwas(int argc, char *argv[])
     cmd.add("--kin", "kinship file", "");
     cmd.add("--out", "output file", "mlm-gwas.out");
     cmd.add("--exact", "using exact test statistic");
+    cmd.add("--openmp", "enable OpenMP multithreading");
 
     cmd.parse(argc, argv);
 
@@ -493,6 +733,7 @@ int mlm_gwas(int argc, char *argv[])
     par.kin = cmd.get("--kin");
     par.out = cmd.get("--out");
     par.exact = cmd.has("--exact");
+    par.openmp = cmd.has("--openmp");
 
     Genotype gt;
     Phenotype pt;
@@ -556,10 +797,18 @@ int mlm_gwas(int argc, char *argv[])
 
         std::vector<double> ps;
 
-        if ( par.exact )
-            assoc_mlm_exact(gt, kin, gi2, y, ac2, ps);
-        else
-            assoc_mlm(gt, kin, gi2, y, ac2, ps);
+        if ( par.exact ) {
+            if ( par.openmp )
+                assoc_mlm_exact_omp(gt, kin, gi2, y, ac2, ps);
+            else
+                assoc_mlm_exact(gt, kin, gi2, y, ac2, ps);
+        }
+        else {
+            if ( par.openmp )
+                assoc_mlm_omp(gt, kin, gi2, y, ac2, ps);
+            else
+                assoc_mlm(gt, kin, gi2, y, ac2, ps);
+        }
 
         vps.push_back(ps);
     }
