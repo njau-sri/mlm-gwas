@@ -35,14 +35,14 @@ struct Parameter
 } par ;
 
 
-void filter_ind(const std::vector<int> &idx, Genotype &gt)
+void filter_ind(const std::vector<size_t> &idx, Genotype &gt)
 {
     if (gt.ploidy == 1) {
         for (auto &v : gt.dat)
             subset(v,idx).swap(v);
     }
     else {
-        std::vector<int> idx2;
+        std::vector<size_t> idx2;
         for (auto i : idx) {
             idx2.push_back(i*2);
             idx2.push_back(i*2+1);
@@ -54,7 +54,7 @@ void filter_ind(const std::vector<int> &idx, Genotype &gt)
     subset(gt.ind, idx).swap(gt.ind);
 }
 
-void filter_ind(const std::vector<int> &idx, SquareData &sd)
+void filter_ind(const std::vector<size_t> &idx, SquareData &sd)
 {
     subset(sd.ind,idx).swap(sd.ind);
     subset(sd.dat,idx).swap(sd.dat);
@@ -62,7 +62,7 @@ void filter_ind(const std::vector<int> &idx, SquareData &sd)
         subset(e,idx).swap(e);
 }
 
-void filter_ind(const std::vector<int> &idx, Phenotype &pt)
+void filter_ind(const std::vector<size_t> &idx, Phenotype &pt)
 {
     subset(pt.ind,idx).swap(pt.ind);
 
@@ -76,7 +76,7 @@ void filter_ind(const std::vector<int> &idx, Phenotype &pt)
         subset(e,idx).swap(e);
 }
 
-void filter_ind(const std::vector<int> &idx, Covariate &ct)
+void filter_ind(const std::vector<size_t> &idx, Covariate &ct)
 {
     subset(ct.ind,idx).swap(ct.ind);
 
@@ -84,7 +84,7 @@ void filter_ind(const std::vector<int> &idx, Covariate &ct)
         subset(e,idx).swap(e);
 }
 
-void merge(Genotype &gt, SquareData &kin, Phenotype &pt, Covariate &ct, std::vector<int> &gi)
+void merge(Genotype &gt, SquareData &kin, Phenotype &pt, Covariate &ct, std::vector<size_t> &gi)
 {
     bool docovar = ! ct.phe.empty() && ! ct.ind.empty();
 
@@ -101,12 +101,10 @@ void merge(Genotype &gt, SquareData &kin, Phenotype &pt, Covariate &ct, std::vec
     std::cerr << "INFO: performing data intersection by individual...\n";
 
     if (gt.ind != kin.ind) {
-        std::vector<int> idx1, idx2;
+        std::vector<size_t> idx1, idx2;
         for (auto &e : intersect(gt.ind, kin.ind)) {
-            auto itr = std::find(gt.ind.begin(), gt.ind.end(), e);
-            idx1.push_back(itr - gt.ind.begin());
-            itr = std::find(kin.ind.begin(), kin.ind.end(), e);
-            idx2.push_back(itr - kin.ind.begin());
+            idx1.push_back( index(gt.ind, e) );
+            idx2.push_back( index(kin.ind, e) );
         }
         filter_ind(idx1, gt);
         filter_ind(idx2, kin);
@@ -116,18 +114,16 @@ void merge(Genotype &gt, SquareData &kin, Phenotype &pt, Covariate &ct, std::vec
     if ( docovar )
         ind = intersect(ind, ct.ind);
 
-    std::vector<int> pi, ci;
     gi.clear();
+    std::vector<size_t> pi, ci;
 
-    for (auto itr = pt.ind.begin(); itr != pt.ind.end(); ++itr) {
-        if ( std::binary_search(ind.begin(), ind.end(), *itr) ) {
-            pi.push_back( itr - pt.ind.begin() );
-            if ( docovar ) {
-                auto itr2 = std::find(ct.ind.begin(), ct.ind.end(), *itr);
-                ci.push_back(itr2 - ct.ind.begin());
-            }
-            auto itr3 = std::find(gt.ind.begin(), gt.ind.end(), *itr);
-            gi.push_back(itr3 - gt.ind.begin());
+    auto n = pt.ind.size();
+    for (size_t i = 0; i < n; ++i) {
+        if ( std::binary_search(ind.begin(), ind.end(), pt.ind[i]) ) {
+            pi.push_back(i);
+            gi.push_back( index(gt.ind, pt.ind[i]) );
+            if ( docovar )
+                ci.push_back( index(ct.ind, pt.ind[i]) );
         }
     }
 
@@ -165,8 +161,10 @@ void parse_envblk(const Phenotype &pt, std::vector< std::vector<double> > &ac, s
     }
 }
 
-int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
-              const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<size_t> &gi,
+              const std::vector<double> &y,
+              const std::vector< std::vector<double> > &ac,
+              std::vector<double> &ps)
 {
     auto n = y.size();
     auto m = gt.dat.size();
@@ -211,7 +209,7 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
         if (gt.ploidy == 1) {
             g1.clear();
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii];
                 if ( a ) {
                     g1.push_back(a);
@@ -223,7 +221,7 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
         else {
             g2.clear();
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii*2];
                 auto b = gt.dat[j][ii*2+1];
                 if ( a && b ) {
@@ -294,8 +292,10 @@ int assoc_mlm(const Genotype &gt, const SquareData &kin, const std::vector<int> 
     return 0;
 }
 
-int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
-                    const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector<size_t> &gi,
+                    const std::vector<double> &y,
+                    const std::vector< std::vector<double> > &ac,
+                    std::vector<double> &ps)
 {
     auto n = y.size();
     auto m = gt.dat.size();
@@ -332,7 +332,7 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
         if (gt.ploidy == 1) {
             g1.clear();
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii];
                 if ( a ) {
                     g1.push_back(a);
@@ -344,7 +344,7 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
         else {
             g2.clear();
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii*2];
                 auto b = gt.dat[j][ii*2+1];
                 if ( a && b ) {
@@ -439,8 +439,10 @@ int assoc_mlm_exact(const Genotype &gt, const SquareData &kin, const std::vector
     return 0;
 }
 
-int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
-                  const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<size_t> &gi,
+                  const std::vector<double> &y,
+                  const std::vector< std::vector<double> > &ac,
+                  std::vector<double> &ps)
 {
     auto n = y.size();
     auto m = gt.dat.size();
@@ -480,7 +482,7 @@ int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<i
         if (gt.ploidy == 1) {
             std::vector<allele_t> g;
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii];
                 if ( a ) {
                     g.push_back(a);
@@ -492,7 +494,7 @@ int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<i
         else {
             std::vector< std::pair<allele_t,allele_t> > g;
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii*2];
                 auto b = gt.dat[j][ii*2+1];
                 if ( a && b ) {
@@ -563,8 +565,10 @@ int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<i
     return 0;
 }
 
-int assoc_mlm_exact_omp(const Genotype &gt, const SquareData &kin, const std::vector<int> &gi, const std::vector<double> &y,
-                        const std::vector< std::vector<double> > &ac, std::vector<double> &ps)
+int assoc_mlm_exact_omp(const Genotype &gt, const SquareData &kin, const std::vector<size_t> &gi,
+                        const std::vector<double> &y,
+                        const std::vector< std::vector<double> > &ac,
+                        std::vector<double> &ps)
 {
     auto n = y.size();
     auto m = gt.dat.size();
@@ -595,7 +599,7 @@ int assoc_mlm_exact_omp(const Genotype &gt, const SquareData &kin, const std::ve
         if (gt.ploidy == 1) {
             std::vector<allele_t> g;
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii];
                 if ( a ) {
                     g.push_back(a);
@@ -607,7 +611,7 @@ int assoc_mlm_exact_omp(const Genotype &gt, const SquareData &kin, const std::ve
         else {
             std::vector< std::pair<allele_t,allele_t> > g;
             for (size_t i = 0; i < n; ++i) {
-                auto ii = static_cast<size_t>(gi[i]);
+                auto ii = gi[i];
                 auto a = gt.dat[j][ii*2];
                 auto b = gt.dat[j][ii*2+1];
                 if ( a && b ) {
@@ -762,7 +766,7 @@ int mlm_gwas(int argc, char *argv[])
         std::cerr << "INFO: " << ct.ind.size() << " individuals, " << ct.phe.size() << " covariates\n";
     }
 
-    std::vector<int> gi;
+    std::vector<size_t> gi;
     merge(gt, kin, pt, ct, gi);
 
     if ( gi.empty() ) {
