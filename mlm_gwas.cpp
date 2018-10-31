@@ -474,7 +474,7 @@ int assoc_mlm_omp(const Genotype &gt, const SquareData &kin, const std::vector<s
         return 1;
     }
 
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for
     for (size_t j = 0; j < m; ++j) {
         std::vector<size_t> idx;
         std::vector< std::vector<double> > x1;
@@ -591,7 +591,7 @@ int assoc_mlm_exact_omp(const Genotype &gt, const SquareData &kin, const std::ve
     for (size_t i = 0; i < n; ++i)
         ki[i*n+i] += 1;
 
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for
     for (size_t j = 0; j < m; ++j) {
         std::vector<size_t> idx;
         std::vector< std::vector<double> > x1;
