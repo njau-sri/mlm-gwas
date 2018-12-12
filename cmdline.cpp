@@ -2,37 +2,10 @@
 #include <iomanip>
 #include <iostream>
 #include "cmdline.h"
+#include "util.h"
 
 
 using std::size_t;
-
-
-namespace {
-
-bool starts_with(const std::string &s1, const std::string &s2)
-{
-    return s2.size() <= s1.size() && s1.compare(0, s2.size(), s2) == 0;
-}
-
-std::string join(const std::vector<std::string> &vs, const std::string &sep)
-{
-    std::string s;
-
-    auto itr = vs.begin();
-    if (itr != vs.end()) {
-        s += *itr;
-        ++itr;
-    }
-
-    for (; itr != vs.end(); ++itr) {
-        s += sep;
-        s += *itr;
-    }
-
-    return s;
-}
-
-} // namespace
 
 
 void CmdLine::add(const std::string &arg, const std::string &msg)
@@ -70,7 +43,7 @@ void CmdLine::show() const
         msg.push_back(flag_msg_.at(e.first));
     }
 
-    std::size_t w = 0;
+    size_t w = 0;
     for (auto &e : arg) {
         if (e.size() > w)
             w = e.size();
@@ -82,7 +55,7 @@ void CmdLine::show() const
     auto n = arg.size();
     std::cerr << std::left;
     for (size_t i = 0; i < n; ++i)
-        std::cerr << std::setw(w) << arg[i] << "  " << msg[i] << "\n";
+        std::cerr << "  " << std::setw(w) << arg[i] << "  " << msg[i] << "\n";
     std::cerr << "\n";
 }
 
@@ -98,45 +71,45 @@ void CmdLine::parse(int argc, char *argv[])
         usage_ += " [options]";
     }
 
-    std::string arg;
+    std::string key;
     std::vector<std::string> val;
 
     for (int i = 1; i < argc; ++i) {
         if ( starts_with(argv[i], "--") ) {
-            if ( ! arg.empty() ) {
-                take(arg, join(val,","));
-                arg.clear();
+            if ( ! key.empty() ) {
+                take(key, join(val,","));
+                key.clear();
                 val.clear();
             }
-            arg = argv[i];
+            key = argv[i];
             val.clear();
         }
         else {
-            if ( ! arg.empty() )
+            if ( ! key.empty() )
                 val.push_back(argv[i]);
             else
                 std::cerr << "ERROR: unrecognized command line argument: " << argv[i] << "\n";
         }
     }
 
-    if ( ! arg.empty() )
-        take(arg, join(val,","));
+    if ( ! key.empty() )
+        take(key, join(val,","));
 }
 
-void CmdLine::take(const std::string &arg, const std::string &val)
+void CmdLine::take(const std::string &key, const std::string &val)
 {
-    if (arg_.count(arg) != 0) {
+    if (arg_.count(key) != 0) {
         if ( ! val.empty() )
-            arg_[arg] = val;
+            arg_[key] = val;
         else
-            std::cerr << "ERROR: missing an argument for: " << arg << "\n";
+            std::cerr << "ERROR: missing an argument for: " << key << "\n";
     }
-    else if (flag_.count(arg) != 0) {
+    else if (flag_.count(key) != 0) {
         if ( val.empty() )
-            flag_[arg] = true;
+            flag_[key] = true;
         else
-            std::cerr << "ERROR: argument is not allowed for: " << arg << "\n";
+            std::cerr << "ERROR: argument is not allowed for: " << key << "\n";
     }
     else
-        std::cerr << "ERROR: unrecognized command line: " << arg << "\n";
+        std::cerr << "ERROR: unrecognized command line: " << key << "\n";
 }

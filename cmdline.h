@@ -21,7 +21,7 @@ public:
     std::string get(const std::string &arg) const;
 
 private:
-    void take(const std::string &arg, const std::string &val);
+    void take(const std::string &key, const std::string &val);
 
 private:
     std::map<std::string, std::string> arg_;
