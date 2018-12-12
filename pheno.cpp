@@ -2,11 +2,30 @@
 #include <limits>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 #include "pheno.h"
 #include "split.h"
 
 
 using std::size_t;
+
+
+namespace {
+
+
+static const std::string kwENV = "_ENV_";
+static const std::string kwBLK = "_BLK_";
+
+
+size_t check_factor(std::vector<std::string> vs)
+{
+    std::sort(vs.begin(), vs.end());
+    vs.erase(std::unique(vs.begin(), vs.end()), vs.end());
+    return vs.size();
+}
+
+
+} // namespace
 
 
 int read_pheno(const std::string &filename, Phenotype &pt)
@@ -32,13 +51,23 @@ int read_pheno(const std::string &filename, Phenotype &pt)
             break;
     }
 
+    if (std::count(colnames.begin(), colnames.end(), kwENV) > 1) {
+        std::cerr << "ERROR: multiple " << kwENV << " is not allowed\n";
+        return 1;
+    }
+
+    if (std::count(colnames.begin(), colnames.end(), kwBLK) > 1) {
+        std::cerr << "ERROR: multiple " << kwBLK << " is not allowed\n";
+        return 1;
+    }
+
     std::vector<size_t> jphe;
     size_t jenv = 0, jblk = 0;
 
     for (size_t j = 1; j < colnames.size(); ++j) {
-        if (colnames[j] == "_ENV_")
+        if (colnames[j] == kwENV)
             jenv = j;
-        else if (colnames[j] == "_BLK_")
+        else if (colnames[j] == kwBLK)
             jblk = j;
         else
             jphe.push_back(j);
@@ -61,8 +90,8 @@ int read_pheno(const std::string &filename, Phenotype &pt)
             continue;
 
         if (vs.size() != colnames.size()) {
-            std::cerr << "ERROR: column count doesn't match at line " << ln << " (" << vs.size()
-                      << "!=" << colnames.size() << "\n";
+            std::cerr << "ERROR: column count doesn't match at line " << ln << ": "
+                      << vs.size() << " != " << colnames.size() << "\n";
             return 1;
         }
 
@@ -96,6 +125,16 @@ int read_pheno(const std::string &filename, Phenotype &pt)
         pt.dat.push_back(v);
     }
 
+    if ( ! pt.env.empty() && check_factor(pt.env) < 2 ) {
+        pt.env.clear();
+        std::cerr << "WARNING: ignoring invalid " << kwENV << " factor\n";
+    }
+
+    if ( ! pt.blk.empty() && check_factor(pt.blk) < 2 ) {
+        pt.blk.clear();
+        std::cerr << "WARNING: ignoring invalid " << kwBLK << " factor\n";
+    }
+
     return 0;
 }
 
@@ -112,11 +151,11 @@ int write_pheno(const Phenotype &pt, const std::string &filename)
 
     ofs << "Indiv";
     if ( ! pt.env.empty() )
-        ofs << "\t_ENV_";
+        ofs << "\t" << kwENV;
     if ( ! pt.blk.empty() )
-        ofs << "\t_BLK_";
-    for (size_t j = 0; j < m; ++j)
-        ofs << "\t" << pt.phe[j];
+        ofs << "\t" << kwBLK;
+    for (auto &e : pt.phe)
+        ofs << "\t" << e;
     ofs << "\n";
 
     for (size_t i = 0; i < n; ++i) {
@@ -156,10 +195,8 @@ int read_covar(const std::string &filename, Covariate &ct)
             break;
     }
 
-    if (colnames.size() < 2)
-        return 0;
-
-    ct.phe.assign(colnames.begin() + 1, colnames.end());
+    for (size_t j = 1; j < colnames.size(); ++j)
+        ct.phe.push_back(colnames[j]);
 
     std::vector< std::vector<double> > dat;
 
@@ -175,8 +212,8 @@ int read_covar(const std::string &filename, Covariate &ct)
             continue;
 
         if (vs.size() != colnames.size()) {
-            std::cerr << "ERROR: column count doesn't match at line " << ln << " (" << vs.size()
-                      << "!=" << colnames.size() << "\n";
+            std::cerr << "ERROR: column count doesn't match at line " << ln << ": "
+                      << vs.size() << " != " << colnames.size() << "\n";
             return 1;
         }
 
@@ -221,8 +258,8 @@ int write_covar(const Covariate &ct, const std::string &filename)
     auto n = ct.ind.size();
 
     ofs << "Indiv";
-    for (size_t j = 0; j < m; ++j)
-        ofs << "\t" << ct.phe[j];
+    for (auto &e : ct.phe)
+        ofs << "\t" << e;
     ofs << "\n";
 
     for (size_t i = 0; i < n; ++i) {
@@ -260,8 +297,8 @@ int read_square(const std::string &filename, SquareData &sd)
             cc = vs.size();
 
         if (vs.size() != cc) {
-            std::cerr << "ERROR: column count doesn't match at line " << ln << " ("
-                      << vs.size() << "!=" << cc << "): " << filename << "\n";
+            std::cerr << "ERROR: column count doesn't match at line " << ln << ": "
+                      << vs.size() << " != " << cc << "\n";
             return 1;
         }
 
